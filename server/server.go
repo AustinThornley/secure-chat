@@ -48,6 +48,15 @@ func generateRegistrationKey() string {
 	return hex.EncodeToString(key)[:20]
 }
 
+// Generates random username
+func generateRandomUsername() string {
+    key := make([]byte, 8) // 8 bytes will give us 16 hex characters
+    if _, err := rand.Read(key); err != nil {
+        log.Fatalf("Failed to generate random username: %v", err)
+    }
+    return "user_" + hex.EncodeToString(key)[:8] // Returns format: user_<8 random hex chars>
+}
+
 // hashPassword returns the SHA-256 hex digest of a password
 func hashPassword(password string) string {
 	hash := sha256.Sum256([]byte(password))
@@ -119,13 +128,8 @@ func handleClient(conn net.Conn) {
 			return
 		}
 
-		fmt.Fprintln(conn, "Enter your desired username: ")
-		usr, err := reader.ReadString('\n')
-		if err != nil {
-			log.Printf("Error reading username: %v", err)
-			return
-		}
-		usr = strings.TrimSpace(usr)
+		usr := generateRandomUsername()
+		fmt.Fprintf(conn, "Your randomly generated username is: %s\n", usr)
 
 		// Note: actual password hiding is a client-side feature
 		fmt.Fprintln(conn, "Enter your desired password (typing not hidden): ")
