@@ -12,6 +12,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	// Use the xeodou fork of go-sqlcipher
 	_ "github.com/xeodou/go-sqlcipher"
@@ -28,6 +29,8 @@ var (
 	db            *sql.DB
 	encryptionKey string
 	masterRegKey  string // single registration code for new signups
+	loginAttempts = make(map[string]time.Time) // map of username and last login attempt time
+	registerAttempts = time.Time{} // single timestamp for all registrations
 )
 
 // generateEncryptionKey returns a random 256-bit encryption key in hex format
@@ -61,6 +64,31 @@ func generateRandomUsername() string {
 func hashPassword(password string) string {
 	hash := sha256.Sum256([]byte(password))
 	return hex.EncodeToString(hash[:])
+}
+
+func checkLoginAttempt(username string) bool {
+    // Check if there's a recent attempt
+    if lastAttempt, exists := loginAttempts[username]; exists {
+        // If last attempt was less than 5 seconds ago, block it
+        if time.Since(lastAttempt) < 5*time.Second {
+            return false
+        }
+    }
+    
+    // Update the last attempt time
+    loginAttempts[username] = time.Now()
+    return true
+}
+
+func checkRegisterAttempt() bool {
+    // If last registration was less than 5 seconds ago, block it
+    if time.Since(registerAttempts) < 5*time.Second {
+        return false
+    }
+    
+    // Update the last registration time
+    registerAttempts = time.Now()
+    return true
 }
 
 // initDatabase initializes an in-memory, SQLCipher-encrypted SQLite DB.
@@ -108,6 +136,12 @@ func handleClient(conn net.Conn) {
 	userChoice = strings.TrimSpace(userChoice)
 
 	if strings.ToLower(userChoice) == "register" {
+		// Check if the user is trying to register too quickly.
+		if !checkRegisterAttempt() {
+			fmt.Fprintln(conn, "Please wait a moment before trying again.")
+			return;
+		}
+
 		fmt.Fprintln(conn, "Enter the server's registration code: ")
 		regAttempt, err := reader.ReadString('\n')
 		if err != nil {
@@ -144,7 +178,7 @@ func handleClient(conn net.Conn) {
 		// Insert into DB
 		_, err = db.Exec("INSERT INTO users (username, password) VALUES (?, ?)", usr, hashed)
 		if err != nil {
-			fmt.Fprintln(conn, "Failed to register: %v\n", err)
+			fmt.Fprintf(conn, "Failed to register: %v\n", err)
 			return
 		}
 		fmt.Fprintln(conn, "Registration successful! You can now login.")
@@ -158,6 +192,12 @@ func handleClient(conn net.Conn) {
 			return
 		}
 		usr = strings.TrimSpace(usr)
+
+		// Check if the user is trying to login too quickly.
+		if !checkLoginAttempt(usr) {
+			fmt.Fprintln(conn, "Please wait a moment before trying again.")
+			return
+		}
 
 		fmt.Fprintln(conn, "Password (typing not hidden): ")
 		pwd, err := reader.ReadString('\n')
